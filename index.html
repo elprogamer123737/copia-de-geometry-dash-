@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Geometry Dash Web</title>
+
+<style>
+body {
+    margin: 0;
+    background: #000;
+    overflow: hidden;
+    font-family: Arial, sans-serif;
+}
+
+/* ===== MENU ===== */
+#menu {
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(circle at center, #111, #000);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 10;
+    color: cyan;
+}
+
+#menu h1 {
+    font-size: 52px;
+    text-shadow: 0 0 25px cyan;
+}
+
+#menu button {
+    padding: 15px 45px;
+    font-size: 22px;
+    cursor: pointer;
+    background: black;
+    color: cyan;
+    border: 2px solid cyan;
+    box-shadow: 0 0 25px cyan;
+}
+
+#menu button:hover {
+    background: cyan;
+    color: black;
+}
+
+/* ===== UI ===== */
+#ui {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: cyan;
+    text-shadow: 0 0 10px cyan;
+    z-index: 5;
+}
+
+/* ===== GAME ===== */
+canvas {
+    display: block;
+    margin: auto;
+    background: linear-gradient(#050505, #000);
+    box-shadow: 0 0 50px cyan;
+}
+</style>
+</head>
+<body>
+
+<div id="menu">
+    <h1>GEOMETRY DASH</h1>
+    <button id="start">INICIAR</button>
+</div>
+
+<div id="ui"></div>
+<canvas id="game" width="960" height="360"></canvas>
+
+<script>
+/* ===================== SETUP ===================== */
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const ui = document.getElementById("ui");
+const menu = document.getElementById("menu");
+const startBtn = document.getElementById("start");
+
+let running = false;
+let gameOver = false;
+let level = 1;
+let speed = 5;
+let mode = "cube";
+let frame = 0;
+
+/* ===================== AUDIO ===================== */
+let audioCtx, musicGain;
+
+function initAudio() {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    musicGain = audioCtx.createGain();
+    musicGain.gain.value = 0.05;
+    musicGain.connect(audioCtx.destination);
+
+    setInterval(() => {
+        if (!running || gameOver) return;
+        tone(180 + level * 5, 0.08);
+    }, 300);
+}
+
+function tone(freq, dur) {
+    const osc = audioCtx.createOscillator();
+    osc.type = "square";
+    osc.frequency.value = freq;
+    osc.connect(musicGain);
+    osc.start();
+    osc.stop(audioCtx.currentTime + dur);
+}
+
+function sfx(freq, dur = 0.1, vol = 0.25) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    gain.gain.value = vol;
+    osc.frequency.value = freq;
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + dur);
+}
+
+/* ===================== PLAYER ===================== */
+const player = {
+    x: 120,
+    y: 260,
+    size: 28,
+    vy: 0,
+    rot: 0
+};
+
+const ground = 260;
+const gravity = 0.8;
+
+/* ===================== WORLD ===================== */
+let obstacles = [];
+let portals = [];
+let particles = [];
+let stars = [];
+
+/* ===================== BACKGROUND ===================== */
+for (let i = 0; i < 80; i++) {
+    stars.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        speed: 0.5 + Math.random() * 1.5
+    });
+}
+
+/* ===================== GAME LOGIC ===================== */
+function jump() {
+    if (!running || gameOver) return;
+
+    if (mode === "cube" && player.y >= ground) {
+        player.vy = -13;
+        sfx(700);
+    }
+    if (mode === "ship") {
+        player.vy = -7;
+        sfx(500);
+    }
+}
+
+function spawnObstacle() {
+    obstacles.push({ x: canvas.width, y: ground + 10, w: 26, h: 26 });
+}
+
+function spawnPortal() {
+    portals.push({ x: canvas.width, y: 170, w: 18, h: 80 });
+}
+
+function collide(a, b) {
+    return a.x < b.x + b.w &&
+           a.x + a.size > b.x &&
+           a.y < b.y + b.h &&
+           a.y + a.size > b.y;
+}
+
+function explode(x, y) {
+    for (let i = 0; i < 30; i++) {
+        particles.push({
+            x, y,
+            vx: (Math.random() - 0.5) * 6,
+            vy: (Math.random() - 0.5) * 6,
+            life: 40
+        });
+    }
+    sfx(120, 0.4, 0.35);
+}
+
+/* ===================== LOOP ===================== */
+function loop() {
+    frame++;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    /* ---- BACKGROUND ---- */
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    ctx.fillStyle = "#0ff";
+    stars.forEach(s => {
+        s.x -= s.speed;
+        if (s.x < 0) s.x = canvas.width;
+        ctx.fillRect(s.x, s.y, 2, 2);
+    });
+
+    if (running && !gameOver) {
+
+        if (mode === "cube") {
+            player.vy += gravity;
+            player.y += player.vy;
+            if (player.y > ground) {
+                player.y = ground;
+                player.vy = 0;
+            }
+            player.rot += 0.1;
+        } else {
+            player.vy += 0.4;
+            player.y += player.vy;
+            player.rot = Math.atan2(player.vy, 5);
+            player.y = Math.max(0, Math.min(player.y, canvas.height - player.size));
+        }
+
+        obstacles.forEach(o => o.x -= speed);
+        portals.forEach(p => p.x -= speed);
+
+        if (frame % 90 === 0) spawnObstacle();
+        if (frame % 700 === 0) spawnPortal();
+
+        obstacles.forEach(o => {
+            if (collide(player, o)) {
+                explode(player.x, player.y);
+                gameOver = true;
+            }
+        });
+
+        portals.forEach(p => {
+            if (collide(player, p)) {
+                mode = mode === "cube" ? "ship" : "cube";
+                player.vy = 0;
+                sfx(900);
+            }
+        });
+
+        if (frame % 1500 === 0) {
+            level++;
+            speed += 0.8;
+        }
+    }
+
+    /* ---- PLAYER ---- */
+    ctx.save();
+    ctx.translate(player.x + 14, player.y + 14);
+    ctx.rotate(player.rot);
+    ctx.fillStyle = mode === "cube" ? "#00ffff" : "#00ff66";
+    ctx.shadowColor = ctx.fillStyle;
+    ctx.shadowBlur = 20;
+    ctx.fillRect(-14, -14, 28, 28);
+    ctx.restore();
+
+    /* ---- OBSTACLES ---- */
+    ctx.fillStyle = "red";
+    ctx.shadowColor = "red";
+    ctx.shadowBlur = 15;
+    obstacles.forEach(o => ctx.fillRect(o.x, o.y, o.w, o.h));
+
+    /* ---- PORTALS ---- */
+    ctx.fillStyle = "purple";
+    ctx.shadowColor = "violet";
+    ctx.shadowBlur = 20;
+    portals.forEach(p => ctx.fillRect(p.x, p.y, p.w, p.h));
+
+    /* ---- PARTICLES ---- */
+    particles.forEach(p => {
+        ctx.fillStyle = "cyan";
+        ctx.fillRect(p.x, p.y, 3, 3);
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life--;
+    });
+    particles = particles.filter(p => p.life > 0);
+
+    ui.textContent = gameOver
+        ? "GAME OVER - R para reiniciar"
+        : `Nivel ${level} | Modo ${mode.toUpperCase()}`;
+
+    requestAnimationFrame(loop);
+}
+
+/* ===================== INPUT ===================== */
+document.addEventListener("keydown", e => {
+    if (e.code === "Space") jump();
+    if (e.code === "KeyR" && gameOver) location.reload();
+});
+
+startBtn.onclick = () => {
+    menu.style.display = "none";
+    running = true;
+    initAudio();
+};
+
+loop();
+</script>
+</body>
+</html>
